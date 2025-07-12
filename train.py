@@ -18,7 +18,7 @@ PPO_EPSILON = 0.2 # Clip parameter for PPO
 PPO_EPOCHS = 10   # Number of epochs for updating policy
 PPO_BATCH_SIZE = 64
 ROLLOUT_STEPS = 2048 # Number of steps to collect in each rollout
-MAX_EPISODES = 1000
+MAX_EPISODES = 2000
 MODEL_PATH = 'ppo_cartpole.pth'
 
 class ActorCritic(nn.Module):
@@ -78,103 +78,107 @@ def main():
     
     print("Starting training...")
     # --- Training Loop ---
-    for episode in range(MAX_EPISODES):
-        # --- Experience Collection (Rollout) ---
-        memory = []
-        steps_collected = 0
-        episode_rewards = []
-        
-        while steps_collected < ROLLOUT_STEPS:
-            state, _ = env.reset()
-            done = False
-            truncated = False
-            current_episode_reward = 0
+    try:
+        for episode in range(MAX_EPISODES):
+            # --- Experience Collection (Rollout) ---
+            memory = []
+            steps_collected = 0
+            episode_rewards = []
             
-            while not done and not truncated:
-                state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)
+            while steps_collected < ROLLOUT_STEPS:
+                state, _ = env.reset()
+                done = False
+                truncated = False
+                current_episode_reward = 0
                 
-                with torch.no_grad():
-                    dist, value = model(state_tensor)
-                    action = dist.sample()
-                    log_prob = dist.log_prob(action)
+                while not done and not truncated:
+                    state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)
+                    
+                    with torch.no_grad():
+                        dist, value = model(state_tensor)
+                        action = dist.sample()
+                        log_prob = dist.log_prob(action)
 
-                next_state, reward, done, truncated, _ = env.step(action.cpu().numpy()[0])
-                
-                memory.append((state, action, reward, log_prob, value, done, truncated))
-                
-                state = next_state
-                current_episode_reward += reward
-                steps_collected += 1
+                    next_state, reward, done, truncated, _ = env.step(action.cpu().numpy()[0])
+                    
+                    memory.append((state, action, reward, log_prob, value, done, truncated))
+                    
+                    state = next_state
+                    current_episode_reward += reward
+                    steps_collected += 1
 
-            episode_rewards.append(current_episode_reward)
+                episode_rewards.append(current_episode_reward)
 
-        # --- Process Rollout Data ---
-        states, actions, rewards, log_probs, values, dones, truncateds = zip(*memory)
+            # --- Process Rollout Data ---
+            states, actions, rewards, log_probs, values, dones, truncateds = zip(*memory)
 
-        states = torch.FloatTensor(np.array(states)).to(device)
-        actions = torch.cat(list(actions)).to(device)
-        rewards = torch.FloatTensor(rewards).to(device)
-        log_probs = torch.cat(list(log_probs)).to(device)
-        values = torch.cat(list(values)).squeeze().to(device)
-        dones = torch.FloatTensor(dones).to(device)
-        truncateds = torch.FloatTensor(truncateds).to(device)
+            states = torch.FloatTensor(np.array(states)).to(device)
+            actions = torch.cat(list(actions)).to(device)
+            rewards = torch.FloatTensor(rewards).to(device)
+            log_probs = torch.cat(list(log_probs)).to(device)
+            values = torch.cat(list(values)).squeeze().to(device)
+            dones = torch.FloatTensor(dones).to(device)
+            truncateds = torch.FloatTensor(truncateds).to(device)
 
-        # --- Calculate Advantages and Returns (GAE) ---
-        advantages = torch.zeros_like(rewards)
-        last_gae_lam = 0
-        for t in reversed(range(len(rewards) - 1)):
-            if t == len(rewards) - 2:
-                next_non_terminal = 1.0 - (dones[t+1] or truncateds[t+1])
-                next_value = values[t+1]
-            else:
-                next_non_terminal = 1.0 - (dones[t+1] or truncateds[t+1])
-                next_value = values[t+1]
-                
-            delta = rewards[t] + GAMMA * next_value * next_non_terminal - values[t]
-            advantages[t] = last_gae_lam = delta + GAMMA * GAE_LAMBDA * next_non_terminal * last_gae_lam
-        
-        returns = advantages + values
+            # --- Calculate Advantages and Returns (GAE) ---
+            advantages = torch.zeros_like(rewards)
+            last_gae_lam = 0
+            for t in reversed(range(len(rewards) - 1)):
+                if t == len(rewards) - 2:
+                    next_non_terminal = 1.0 - (dones[t+1] or truncateds[t+1])
+                    next_value = values[t+1]
+                else:
+                    next_non_terminal = 1.0 - (dones[t+1] or truncateds[t+1])
+                    next_value = values[t+1]
+                    
+                delta = rewards[t] + GAMMA * next_value * next_non_terminal - values[t]
+                advantages[t] = last_gae_lam = delta + GAMMA * GAE_LAMBDA * next_non_terminal * last_gae_lam
+            
+            returns = advantages + values
 
-        # --- PPO Update ---
-        for _ in range(PPO_EPOCHS):
-            # Create batches
-            indices = np.arange(len(states))
-            np.random.shuffle(indices)
-            for start in range(0, len(states), PPO_BATCH_SIZE):
-                end = start + PPO_BATCH_SIZE
-                batch_indices = indices[start:end]
+            # --- PPO Update ---
+            for _ in range(PPO_EPOCHS):
+                # Create batches
+                indices = np.arange(len(states))
+                np.random.shuffle(indices)
+                for start in range(0, len(states), PPO_BATCH_SIZE):
+                    end = start + PPO_BATCH_SIZE
+                    batch_indices = indices[start:end]
 
-                # Get batch data
-                batch_states = states[batch_indices].to(device)
-                batch_actions = actions[batch_indices].to(device)
-                batch_log_probs = log_probs[batch_indices].to(device)
-                batch_advantages = advantages[batch_indices].to(device)
-                batch_returns = returns[batch_indices].to(device)
+                    # Get batch data
+                    batch_states = states[batch_indices].to(device)
+                    batch_actions = actions[batch_indices].to(device)
+                    batch_log_probs = log_probs[batch_indices].to(device)
+                    batch_advantages = advantages[batch_indices].to(device)
+                    batch_returns = returns[batch_indices].to(device)
 
-                # Get new log probs and values
-                new_dist, new_values = model(batch_states)
-                new_log_probs = new_dist.log_prob(batch_actions)
-                
-                # --- Policy (Actor) Loss ---
-                ratio = (new_log_probs - batch_log_probs).exp()
-                surr1 = ratio * batch_advantages
-                surr2 = torch.clamp(ratio, 1.0 - PPO_EPSILON, 1.0 + PPO_EPSILON) * batch_advantages
-                actor_loss = -torch.min(surr1, surr2).mean()
+                    # Get new log probs and values
+                    new_dist, new_values = model(batch_states)
+                    new_log_probs = new_dist.log_prob(batch_actions)
+                    
+                    # --- Policy (Actor) Loss ---
+                    ratio = (new_log_probs - batch_log_probs).exp()
+                    surr1 = ratio * batch_advantages
+                    surr2 = torch.clamp(ratio, 1.0 - PPO_EPSILON, 1.0 + PPO_EPSILON) * batch_advantages
+                    actor_loss = -torch.min(surr1, surr2).mean()
 
-                # --- Value (Critic) Loss ---
-                critic_loss = (new_values.squeeze() - batch_returns).pow(2).mean()
-                
-                # --- Total Loss ---
-                loss = actor_loss + 0.5 * critic_loss
+                    # --- Value (Critic) Loss ---
+                    critic_loss = (new_values.squeeze() - batch_returns).pow(2).mean()
+                    
+                    # --- Total Loss ---
+                    loss = actor_loss + 0.5 * critic_loss
 
-                # --- Update ---
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+                    # --- Update ---
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
 
-        avg_reward = np.mean(episode_rewards)
-        all_episode_rewards.append(avg_reward)
-        print(f"Episode {episode+1}/{MAX_EPISODES}, Average Reward: {avg_reward:.2f}")
+            avg_reward = np.mean(episode_rewards)
+            all_episode_rewards.append(avg_reward)
+            print(f"Episode {episode+1}/{MAX_EPISODES}, Average Reward: {avg_reward:.2f}")
+            
+    except KeyboardInterrupt:
+        print("\nTraining interrupted. Saving model...")
 
     # --- Save Model and Plot ---
     torch.save(model.state_dict(), MODEL_PATH)

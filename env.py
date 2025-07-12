@@ -86,8 +86,16 @@ class CartPoleEnv(gym.Env):
         obs = self._get_obs()
 
         # --- Reward Function ---
-        # Reward is 1 for every step the pole is upright.
-        reward = 1.0
+        # Reward is a combination of survival and trick incentives.
+        
+        # Survival reward: 1 for every step the pole is upright.
+        survival_reward = 1.0
+        
+        # Trick reward: Encourage high angular velocity for the pole.
+        pole_angular_velocity = obs[3]
+        trick_reward = np.abs(pole_angular_velocity) * 0.1 # Scale factor
+
+        reward = survival_reward + trick_reward
 
         # --- Termination Conditions ---
         cart_pos = obs[0]
@@ -142,6 +150,9 @@ class CartPoleEnv(gym.Env):
                 # Import here to avoid window creation if not rendering.
                 from mujoco.viewer import launch_passive
                 self.viewer = launch_passive(self.model, self.data)
+                # Hide the left and right panels
+                self.viewer.opt.left = False
+                self.viewer.opt.right = False
             
             if self.viewer is not None:
                 self.viewer.sync()
