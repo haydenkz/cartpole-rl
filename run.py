@@ -56,6 +56,7 @@ def main():
 
             state, reward, done, truncated, _ = env.step(action.numpy()[0])
             episode_reward += reward
+            env.render()
             
             # Optional: add a small delay to make rendering easier to watch
             time.sleep(0.01)

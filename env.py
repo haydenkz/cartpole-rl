@@ -72,6 +72,14 @@ class CartPoleEnv(gym.Env):
             self.data.qvel[1]   # Pole angular velocity
         ], dtype=np.float64)
 
+    def set_pole_state(self, angle, angular_velocity):
+        """
+        Sets the pole's angle and angular velocity directly.
+        """
+        self.data.qpos[1] = angle
+        self.data.qvel[1] = angular_velocity
+        mujoco.mj_forward(self.model, self.data)
+
     def step(self, action):
         """
         Applies an action to the environment and steps the simulation forward.
@@ -110,9 +118,6 @@ class CartPoleEnv(gym.Env):
             cart_pos < -1.0 or cart_pos > 1.0
         )
 
-        if self.render_mode == "human":
-            self.render()
-
         return obs, reward, terminated, truncated, {}
 
     def reset(self, seed=None, options=None):
@@ -127,13 +132,10 @@ class CartPoleEnv(gym.Env):
         # Add small random noise to initial position and velocity
         self.data.qpos[0] = self.np_random.uniform(low=-0.05, high=0.05)
         self.data.qvel[0] = self.np_random.uniform(low=-0.05, high=0.05)
-        self.data.qpos[1] = self.np_random.uniform(low=-0.05, high=0.05)
-        self.data.qvel[1] = self.np_random.uniform(low=-0.05, high=0.05)
+        self.data.qpos[1] = self.np_random.uniform(low=-0.15, high=0.15)
+        self.data.qvel[1] = self.np_random.uniform(low=-1.0, high=1.0)
 
         mujoco.mj_forward(self.model, self.data)
-
-        if self.render_mode == "human":
-            self.render()
 
         return self._get_obs(), {}
 
@@ -147,13 +149,10 @@ class CartPoleEnv(gym.Env):
 
         try:
             if self.viewer is None and self.render_mode == 'human':
-                # Import here to avoid window creation if not rendering.
                 from mujoco.viewer import launch_passive
                 self.viewer = launch_passive(self.model, self.data)
-                # Hide the left and right panels
-                self.viewer.opt.left = False
-                self.viewer.opt.right = False
-            
+
+
             if self.viewer is not None:
                 self.viewer.sync()
 
@@ -175,10 +174,22 @@ if __name__ == '__main__':
     # Example of how to use the environment
     env = CartPoleEnv(render_mode='human')
     obs, info = env.reset()
-    for _ in range(1000):
-        action = env.action_space.sample()  # Sample a random action
+    print(f"Initial observation: {obs}")
+
+    # Test setting pole state
+    print("\nSetting pole to 45 degrees (0.785 radians) and 0 angular velocity...")
+    env.set_pole_state(angle=0.785, angular_velocity=0.0)
+    obs, reward, terminated, truncated, info = env.step(np.array([0.0])) # Take a step with no action
+    print(f"Observation after setting state: {obs}")
+
+    print("\nRunning for 100 steps with no action to observe pole behavior...")
+    for _ in range(100):
+        action = np.array([0.0]) # No action
         obs, reward, terminated, truncated, info = env.step(action)
         if terminated or truncated:
             print("Episode finished. Resetting.")
             obs, info = env.reset()
+            break
+    print(f"Observation after 100 steps: {obs}")
+
     env.close()
